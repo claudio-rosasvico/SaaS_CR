@@ -1,0 +1,85 @@
+
+services:
+  app:
+    build:
+      context: ./docker/app
+    container_name: chatbot_app
+    volumes:
+      - ./:/var/www
+      - vendor:/var/www/vendor
+    depends_on:
+      - mysql
+      - redis
+    networks:
+      - backend
+
+  nginx:
+    build:
+      context: ./docker/nginx
+    container_name: chatbot_nginx
+    ports:
+      - "8080:80"     # http://localhost:8080
+    volumes:
+      - ./:/var/www
+    depends_on:
+      - app
+    networks:
+      - backend
+
+  mysql:
+    image: mysql:8.0
+    container_name: chatbot_mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: chatbot
+      MYSQL_USER: chatbot
+      MYSQL_PASSWORD: chatbot
+    command: ["mysqld", "--mysqlx=0"] # desactiva mysqlx para simplificar
+    ports:
+      - "3306:3306"
+    volumes:
+      - dbdata:/var/lib/mysql
+      - ./docker/mysql/my.cnf:/etc/mysql/conf.d/my.cnf
+    networks:
+      - backend
+
+  redis:
+    image: redis:7-alpine
+    container_name: chatbot_redis
+    ports:
+      - "6379:6379"
+    networks:
+      - backend
+
+  queue:
+    build:
+      context: ./docker/app
+    container_name: chatbot_queue
+    command: php artisan horizon
+    depends_on: [app, redis]
+    volumes:
+      - ./:/var/www
+      - vendor:/var/www/vendor
+    restart: unless-stopped
+    networks: [backend]
+
+  telegram_poll:
+    build: ./docker/app
+    container_name: chatbot_tg_poll
+    command: php artisan telegram:poll
+    restart: unless-stopped
+    depends_on:
+      - app
+      - mysql
+    volumes:
+      - ./:/var/www
+      - vendor:/var/www/vendor
+    networks:
+      - backend
+
+networks:
+  backend:
+
+volumes:
+  vendor:
+  dbdata:
