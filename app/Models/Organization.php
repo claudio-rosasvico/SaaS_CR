@@ -8,7 +8,7 @@ use App\Models\Concerns\BelongsToOrganization;
 
 class Organization extends Model
 {
-    use HasFactory, BelongsToOrganization;
+    use HasFactory;
 
     protected $fillable = ['name'];
 

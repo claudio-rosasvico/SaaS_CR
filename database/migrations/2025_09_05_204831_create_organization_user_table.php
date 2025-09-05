@@ -1,4 +1,4 @@
-// database/migrations/2025_09_04_000001_create_organization_user_table.php
+<?php
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;

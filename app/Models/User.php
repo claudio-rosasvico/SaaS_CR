@@ -11,7 +11,7 @@ use App\Models\Concerns\BelongsToOrganization;
 
 class User extends Authenticatable
 {
-    use HasApiTokens, HasFactory, Notifiable, BelongsToOrganization;
+    use HasApiTokens, HasFactory, Notifiable;
 
     /**
      * The attributes that are mass assignable.
