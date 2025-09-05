@@ -3,6 +3,9 @@
 namespace App\Livewire;
 
 use Livewire\Component;
+use Livewire\Attributes\On;
+use App\Models\Message;
+use App\Models\Conversation;
 use App\Services\ChatService;
 
 class ChatWidget extends Component
@@ -13,30 +16,58 @@ class ChatWidget extends Component
 
     public function mount(ChatService $chat)
     {
-        // Creamos la conversación al montar
-        $resp = $chat->handle(null, '¡Hola!', 'web'); // mensaje semilla opcional
-        $this->conversationId = $resp['conversation_id'];
-        // No mostramos el “¡Hola!” del user semilla; sólo vaciamos
-        \App\Models\Message::where('conversation_id', $this->conversationId)
-            ->where('role', 'user')->where('content','¡Hola!')->delete();
+        if ($this->conversationId) {
+            $this->loadMessages();
+            return;
+        }
+
+        $bot = ensure_default_bot();
+
+        $conv = \App\Models\Conversation::create([
+            'channel'          => 'web',
+            'started_at'       => now(),
+            'organization_id'  => current_org_id(),
+            'bot_id'           => $bot->id,
+        ]);
+
+        $this->conversationId = $conv->id;
+        $this->loadMessages();
     }
 
+    // Envío “no streaming” (si lo querés conservar para pruebas)
     public function send(ChatService $chat)
     {
         $text = trim($this->input);
         if ($text === '') return;
 
-        $resp = $chat->handle($this->conversationId, $text, 'web');
-
-        foreach ($resp['messages'] as $m) {
-            // Evitamos duplicar si ya están (simple: sólo empujamos los últimos 2)
-        }
-        $lastTwo = array_slice($resp['messages'], -2);
-        foreach ($lastTwo as $m) {
-            $this->messages[] = ['role' => $m['role'], 'content' => $m['content']];
-        }
-
+        $chat->handle($this->conversationId, $text, 'web');
+        $this->loadMessages();
         $this->input = '';
+    }
+
+    #[On('refreshMessages')]
+    public function refreshMessages(): void
+    {
+        $this->loadMessages();
+    }
+
+    public function refresh(): void
+    {
+        $this->loadMessages();
+    }
+
+    protected function loadMessages(): void
+    {
+        if (!$this->conversationId) {
+            $this->messages = [];
+            return;
+        }
+
+        $this->messages = Message::where('conversation_id', $this->conversationId)
+            ->orderBy('id')
+            ->get(['role', 'content'])
+            ->map(fn($m) => ['role' => $m->role, 'content' => $m->content])
+            ->all();
     }
 
     public function render()

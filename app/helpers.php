@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Support\Facades\Auth;
+use App\Models\Bot;
 
 if (! function_exists('current_org_id')) {
     /**
@@ -51,3 +52,28 @@ if (! function_exists('current_org')) {
         return $id ? \App\Models\Organization::find($id) : null;
     }
 }
+
+
+if (! function_exists('ensure_default_bot')) {
+    function ensure_default_bot(): Bot {
+        $orgId = current_org_id();
+        $bot = Bot::where('organization_id', $orgId)->orderBy('id')->first();
+        if ($bot) return $bot;
+
+        // crear uno por defecto
+        return Bot::create([
+            'organization_id' => $orgId,
+            'name'   => 'Demo Web',
+            'channel'=> 'web',
+            'config' => [
+                'system_prompt' => "Eres un asistente de soporte que responde en español, claro y conciso. Prioriza la información de las FUENTES proporcionadas. Si falta información en el contexto, dilo explícitamente y sugiere qué documento subir.",
+                'temperature'   => 0.2,
+                'max_tokens'    => 400,
+                'retrieval_mode'=> env('RETRIEVAL_MODE','semantic'),
+                'citations'     => false,  // si luego querés forzar que cite
+                'language'      => 'es',
+            ],
+        ]);
+    }
+}
+
