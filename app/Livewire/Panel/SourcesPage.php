@@ -41,7 +41,7 @@ class SourcesPage extends Component
         } elseif ($this->type === 'url') {
             $source->url = $this->url;
         } else { // pdf
-            $path = $this->pdf->store('sources', 'public');
+            $path = $this->pdf->store('tenants/' . current_org_id() . '/sources', 'public');
             $source->storage_path = $path;
         }
 

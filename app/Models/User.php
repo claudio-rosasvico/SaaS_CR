@@ -7,10 +7,11 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
+use App\Models\Concerns\BelongsToOrganization;
 
 class User extends Authenticatable
 {
-    use HasApiTokens, HasFactory, Notifiable;
+    use HasApiTokens, HasFactory, Notifiable, BelongsToOrganization;
 
     /**
      * The attributes that are mass assignable.
@@ -45,5 +46,25 @@ class User extends Authenticatable
         'password' => 'hashed',
     ];
 
-    public function isAdmin(): bool { return $this->role === 'admin'; }
+    public function isAdmin(): bool
+    {
+        return $this->role === 'admin';
+    }
+
+    public function organizations()
+    {
+        return $this->belongsToMany(\App\Models\Organization::class)->withTimestamps()->withPivot('role');
+    }
+    public function currentOrganization()
+    {
+        return $this->belongsTo(\App\Models\Organization::class, 'current_organization_id');
+    }
+    public function isOwnerOrAdmin(?int $orgId = null): bool
+    {
+        $orgId ??= $this->current_organization_id;
+        return $this->organizations()
+            ->where('organization_id', $orgId)
+            ->whereIn('role', ['owner', 'admin'])
+            ->exists();
+    }
 }
