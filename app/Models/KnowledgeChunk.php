@@ -18,11 +18,13 @@ class KnowledgeChunk extends Model
         'position',
         'content',
         'metadata',
-        'embedding'
+        'embedding',
+        'embedded_at'
     ];
     protected $casts = [
         'metadata'  => 'array',
         'embedding' => 'array',
+        'embedded_at' => 'datetime',
     ];
 
     public function source()

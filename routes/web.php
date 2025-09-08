@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\ChatStreamController;
+use App\Http\Controllers\Panel\BillingController;
 use App\Http\Controllers\Panel\MetricsController;
 use App\Http\Controllers\ProfileController;
 use App\Livewire\Panel\ConversationShow;
@@ -37,9 +38,12 @@ Route::middleware(['auth', 'admin'])->group(function () {
     ->name('panel.conversations.show');
     Route::get('/panel/metrics', [MetricsController::class, 'index'])->name('panel.metrics');
     Route::view('/panel/bot', 'panel.bot')->name('panel.bot');
+    Route::view('/panel/bots', 'panel.bots')->name('panel.bots');
 
     Route::view('/chat', 'chat')->name('chat');
     Route::post('/stream-chat', ChatStreamController::class)->name('stream.chat');
+
+    Route::get('/panel/billing', [BillingController::class, 'index'])->name('panel.billing');
 });
 
 require __DIR__.'/auth.php';

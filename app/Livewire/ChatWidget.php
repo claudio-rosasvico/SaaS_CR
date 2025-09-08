@@ -14,27 +14,27 @@ class ChatWidget extends Component
     public array $messages = [];
     public string $input = '';
 
-    public function mount(ChatService $chat)
+    public function mount(\App\Services\ChatService $chat)
     {
         if ($this->conversationId) {
             $this->loadMessages();
             return;
         }
 
-        $bot = ensure_default_bot();
+        // 👇 toma el bot default del canal web
+        $bot = ensure_default_bot('web');
 
-        $conv = \App\Models\Conversation::create([
+        $conv = Conversation::create([
             'channel'          => 'web',
             'started_at'       => now(),
             'organization_id'  => current_org_id(),
-            'bot_id'           => $bot->id,
+            'bot_id'           => $bot->id,   // 👈 clave
         ]);
 
         $this->conversationId = $conv->id;
         $this->loadMessages();
     }
 
-    // Envío “no streaming” (si lo querés conservar para pruebas)
     public function send(ChatService $chat)
     {
         $text = trim($this->input);

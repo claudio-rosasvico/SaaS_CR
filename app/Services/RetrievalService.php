@@ -67,7 +67,7 @@ class RetrievalService
         if ($q === '') return [];
 
         // 1) Vector de la consulta
-        $qv = $this->emb->embedText($q);
+        $qv = $this->emb->embed($q);
 
         // 2) Pre-filtrado con FULLTEXT (rápido) para no comparar todo
         $cands = [];

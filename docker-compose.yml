@@ -12,6 +12,8 @@ services:
       - redis
     networks:
       - backend
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   nginx:
     build:
@@ -63,6 +65,8 @@ services:
       - vendor:/var/www/vendor
     restart: unless-stopped
     networks: [backend]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   telegram_poll:
     build: ./docker/app
@@ -77,6 +81,8 @@ services:
       - vendor:/var/www/vendor
     networks:
       - backend
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
 networks:
   backend:

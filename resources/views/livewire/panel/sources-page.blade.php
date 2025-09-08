@@ -64,7 +64,9 @@
                                     <th>Título</th>
                                     <th>Tipo</th>
                                     <th>Estado</th>
+                                    <th>Progreso</th>
                                     <th>Acciones</th>
+
                                 </tr>
                             </thead>
                             <tbody>
@@ -76,6 +78,27 @@
                                         <td>
                                             @php $color = $s->status === 'ready' ? 'success' : ($s->status === 'error' ? 'danger' : 'warning'); @endphp
                                             <span class="badge bg-{{ $color }}">{{ $s->status }}</span>
+                                        </td>
+                                        <td style="min-width:160px">
+                                            @php
+                                                $cc = (int) ($s->chunks_count ?? 0);
+                                                $ec = (int) ($s->embedded_count ?? 0);
+                                                $pct = $cc > 0 ? min(100, (int) round(($ec * 100) / $cc)) : 0;
+                                                $badge =
+                                                    $s->status === 'ready'
+                                                        ? 'success'
+                                                        : ($s->status === 'error'
+                                                            ? 'danger'
+                                                            : 'warning');
+                                            @endphp
+                                            <div class="progress" role="progressbar" aria-valuenow="{{ $pct }}"
+                                                aria-valuemin="0" aria-valuemax="100">
+                                                <div class="progress-bar bg-{{ $badge }}"
+                                                    style="width: {{ $pct }}%">{{ $pct }}%</div>
+                                            </div>
+                                            @if (!empty($s->error))
+                                                <div class="text-danger small mt-1">{{ $s->error }}</div>
+                                            @endif
                                         </td>
                                         <td>
                                             @if ($s->status !== 'ready')

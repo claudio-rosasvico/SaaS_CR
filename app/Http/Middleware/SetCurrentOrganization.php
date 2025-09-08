@@ -1,4 +1,4 @@
-// app/Http/Middleware/SetCurrentOrganization.php
+<?php
 namespace App\Http\Middleware;
 
 use Closure;

@@ -22,7 +22,7 @@ class RagEmbedMissing extends Command
 
         foreach ($q as $chunk) {
             try {
-                $vec = $emb->embedText($chunk->content);
+                $vec = $emb->embed($chunk->content);
                 // chequear dimensión opcional
                 if ($dim > 0 && count($vec) !== $dim) {
                     $this->warn("Dimensión inesperada (".count($vec).") en chunk {$chunk->id}");

@@ -55,7 +55,8 @@ if (! function_exists('current_org')) {
 
 
 if (! function_exists('ensure_default_bot')) {
-    function ensure_default_bot(): Bot {
+    function ensure_default_bot(): Bot
+    {
         $orgId = current_org_id();
         $bot = Bot::where('organization_id', $orgId)->orderBy('id')->first();
         if ($bot) return $bot;
@@ -64,12 +65,12 @@ if (! function_exists('ensure_default_bot')) {
         return Bot::create([
             'organization_id' => $orgId,
             'name'   => 'Demo Web',
-            'channel'=> 'web',
+            'channel' => 'web',
             'config' => [
                 'system_prompt' => "Eres un asistente de soporte que responde en español, claro y conciso. Prioriza la información de las FUENTES proporcionadas. Si falta información en el contexto, dilo explícitamente y sugiere qué documento subir.",
                 'temperature'   => 0.2,
                 'max_tokens'    => 400,
-                'retrieval_mode'=> env('RETRIEVAL_MODE','semantic'),
+                'retrieval_mode' => env('RETRIEVAL_MODE', 'semantic'),
                 'citations'     => false,  // si luego querés forzar que cite
                 'language'      => 'es',
             ],
@@ -77,3 +78,37 @@ if (! function_exists('ensure_default_bot')) {
     }
 }
 
+if (! function_exists('ensure_default_bot')) {
+    function ensure_default_bot(string $channel = 'web'): Bot
+    {
+        $orgId = current_org_id();
+        $bot = Bot::where('organization_id', $orgId)
+            ->where('channel', $channel)
+            ->where('is_default', true)
+            ->first();
+
+        if ($bot) return $bot;
+
+        // fallback al primero del canal
+        $bot = Bot::where('organization_id', $orgId)
+            ->where('channel', $channel)
+            ->orderBy('id')->first();
+        if ($bot) return $bot;
+
+        // crear uno por defecto para el canal
+        return Bot::create([
+            'organization_id' => $orgId,
+            'name'    => ucfirst($channel) . ' Bot',
+            'channel' => $channel,
+            'is_default' => true,
+            'config'  => [
+                'system_prompt' => "Eres un asistente de soporte que responde en español, claro y conciso. Usa SOLO el contexto proporcionado. Si no está, dilo.",
+                'temperature'   => 0.2,
+                'max_tokens'    => 350,
+                'language'      => 'es',
+                'retrieval_mode' => env('RETRIEVAL_MODE', 'semantic'),
+                'citations'     => false,
+            ],
+        ]);
+    }
+}

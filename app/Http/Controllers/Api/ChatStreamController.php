@@ -19,25 +19,28 @@ class ChatStreamController extends Controller
         $convId   = $req->input('conversation_id');
         $channel  = (string) $req->input('channel', 'web');
 
-        // Crear/obtener conversación (ya con bot)
+        // Crear/obtener conversación con bot por canal
         $conversation = $convId
             ? Conversation::findOrFail($convId)
             : Conversation::create([
                 'channel'          => $channel,
                 'started_at'       => now(),
                 'organization_id'  => current_org_id(),
-                'bot_id'           => ensure_default_bot()->id,
+                'bot_id'           => ensure_default_bot($channel)->id, // 👈 aquí
             ]);
 
-        // Asegurar que tenga bot asignado
+        // Si la conversación ya existía pero no tiene bot/canal, completamos
+        $channel = $conversation->channel ?: $channel;
+
         $bot = $conversation->bot_id
             ? Bot::find($conversation->bot_id)
-            : ensure_default_bot();
+            : ensure_default_bot($channel);
 
         if (!$conversation->bot_id && $bot) {
             $conversation->bot_id = $bot->id;
             $conversation->save();
         }
+
 
         // Guardar mensaje del usuario
         $userMsg = Message::create([
@@ -64,7 +67,7 @@ class ChatStreamController extends Controller
             $rules .= "\n- Cuando corresponda, cita la fuente por título entre [corchetes].";
         }
         $system = $persona !== '' ? ($persona . "\n\nReglas:\n" . $rules)
-                                  : ("Asistente útil.\n\nReglas:\n" . $rules);
+            : ("Asistente útil.\n\nReglas:\n" . $rules);
 
         // Si no hay contexto, devolvemos respuesta corta sin stream (y persistimos)
         if (trim($context) === '') {
@@ -97,7 +100,10 @@ class ChatStreamController extends Controller
         return response()->stream(function () use ($llm, $messages, $conversation, $hits, $provider, $model, $context, $temp, $maxTokens) {
             $t0    = microtime(true);
             $reply = '';
-            $flush = function () { @ob_flush(); @flush(); };
+            $flush = function () {
+                @ob_flush();
+                @flush();
+            };
 
             try {
                 $llm->stream($messages, [
