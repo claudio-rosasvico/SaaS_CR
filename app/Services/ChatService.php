@@ -16,57 +16,83 @@ class ChatService
 
     public function handle(?int $conversationId, string $userText, string $channel = 'web'): array
     {
-        $bot = ensure_default_bot($channel);
-        $conversation = $conversationId
-            ? Conversation::findOrFail($conversationId)
-            : Conversation::create([
-                'channel'          => $channel,
-                'started_at'       => now(),
-                'organization_id'  => current_org_id(),
-                'bot_id'           => isset($bot) && isset($bot->id) ? $bot->id : null,
+        // 1) Obtener/crear conversación y FIJAR bot default del canal
+        if ($conversationId) {
+            $conversation = Conversation::findOrFail($conversationId);
+            $channelUsed  = $conversation->channel ?: $channel;
+            $defaultBot   = ensure_default_bot($channelUsed);
+
+            if ($conversation->bot_id !== $defaultBot->id) {
+                $conversation->bot_id = $defaultBot->id;
+                $conversation->save();
+            }
+            $bot = $defaultBot;
+        } else {
+            $channelUsed = $channel;
+            $bot         = ensure_default_bot($channelUsed);
+
+            $conversation = Conversation::create([
+                'channel'         => $channelUsed,
+                'started_at'      => now(),
+                'organization_id' => current_org_id(),
+                'bot_id'          => $bot->id,
             ]);
-
-        // Asegurar bot asignado
-        $bot = $conversation->bot_id
-            ? Bot::find($conversation->bot_id)
-            : ensure_default_bot($conversation->channel);
-
-        if (!$conversation->bot_id && $bot) {
-            $conversation->bot_id = $bot->id;
-            $conversation->save();
         }
 
-        $userMsg = Message::create([
-            'conversation_id'   => $conversation->id,
-            'role'              => 'user',
-            'content'           => $userText,
-            'organization_id'   => $conversation->organization_id,
+        // (debug opcional)
+        \Log::info('CHAT: usando bot', [
+            'conv'     => $conversation->id,
+            'org'      => $conversation->organization_id,
+            'channel'  => $channelUsed,
+            'bot_id'   => $bot->id,
+            'bot_name' => $bot->name ?? null,
         ]);
 
-        // --- Métricas: cronómetro
+        // 2) Mensaje del usuario
+        $userMsg = Message::create([
+            'conversation_id' => $conversation->id,
+            'role'            => 'user',
+            'content'         => $userText,
+            'organization_id' => $conversation->organization_id,
+        ]);
+
+        // 3) Métricas
         $__t0 = microtime(true);
 
-        // Retrieval
+        // 4) Retrieval
         $hits    = $this->retrieval->search($userText, 6);
         $context = $this->retrieval->buildContext($hits, 1800);
 
-        // Persona y parámetros del bot
-        $cfg        = $bot?->config ?? [];
-        $persona    = trim((string)($cfg['system_prompt'] ?? ''));
-        $temp       = (float) ($cfg['temperature']  ?? env('LLM_TEMPERATURE', 0.2));
-        $maxTokens  = (int)   ($cfg['max_tokens']   ?? env('LLM_MAX_TOKENS', 500));
-        $lang       = (string)($cfg['language']     ?? 'es');
-        $citations  = (bool)  ($cfg['citations']    ?? false);
+        // 5) Perfil del bot y construcción del system
+        $cfg       = $bot->config ?? [];
+        $persona   = trim((string)($cfg['system_prompt'] ?? ''));
+        $temp      = (float) ($cfg['temperature']  ?? env('LLM_TEMPERATURE', 0.2));
+        $maxTokens = (int)   ($cfg['max_tokens']   ?? env('LLM_MAX_TOKENS', 500));
+        $lang      = (string)($cfg['language']     ?? 'es');
+        $citations = (bool)  ($cfg['citations']    ?? false);
 
-        // Construimos el system con la persona + reglas de uso de contexto
-        $rules = "- Usa SOLO el CONTEXTO proporcionado.\n- Si la información no está, dilo.\n- Responde en {$lang} con frases breves.";
+        $rules = "- Usá SOLO el CONTEXTO proporcionado.\n- Si la información no está, decilo y ofrecé alternativas.\n- Respondé en {$lang} con tono cercano y propositivo.";
         if ($citations) {
-            $rules .= "\n- Cuando corresponda, cita la fuente por título entre [corchetes].";
+            $rules .= "\n- Cuando corresponda, nombrá la localidad/organismo como referencia (sin URLs).";
         }
-        $system = $persona !== '' ? ($persona . "\n\nReglas:\n" . $rules) : ("Asistente útil.\n\nReglas:\n" . $rules);
 
+        $system = $persona !== ''
+            ? ($persona . "\n\nReglas:\n" . $rules)
+            : ("Asistente útil.\n\nReglas:\n" . $rules);
+
+        // (debug opcional)
+        \Log::info('CHAT: params al LLM', [
+            'bot_id'  => $bot->id,
+            'channel' => $channelUsed,
+            'temp'    => $temp,
+            'maxTok'  => $maxTokens,
+            'sys_head'=> mb_substr($system, 0, 160),
+        ]);
+
+        // 6) LLM
         try {
             $reply = $this->answerWithLlm($userText, $context, $system, $temp, $maxTokens);
+
             $usedProvider = env('LLM_PROVIDER', 'ollama');
             switch ($usedProvider) {
                 case 'openai':
@@ -79,9 +105,8 @@ class ChatService
                     $usedModel = env('OLLAMA_MODEL');
                     break;
             }
-            if (!$usedModel) {
-                $usedModel = 'unknown';
-            }
+            $usedModel = $usedModel ?: 'unknown';
+
         } catch (\Throwable $e) {
             \Log::error('LLM fallo', ['error' => $e->getMessage()]);
             $reply        = $this->fallbackFromChunks($hits, $userText);
@@ -89,15 +114,16 @@ class ChatService
             $usedModel    = 'fragments';
         }
 
+        // 7) Mensaje del asistente
         $assistantMsg = Message::create([
-            'conversation_id'   => $conversation->id,
-            'role'              => 'assistant',
-            'content'           => $reply,
-            'meta'              => ['citations' => $this->titlesOnly($hits)],
-            'organization_id'   => $conversation->organization_id,
+            'conversation_id' => $conversation->id,
+            'role'            => 'assistant',
+            'content'         => $reply,
+            'meta'            => ['citations' => $this->titlesOnly($hits)],
+            'organization_id' => $conversation->organization_id,
         ]);
 
-        // Métricas
+        // 8) Analytics
         $durationMs = (int) round((microtime(true) - $__t0) * 1000);
         $tokensIn   = (int) ceil(mb_strlen($context) / 4);
         $tokensOut  = (int) ceil(mb_strlen($reply)   / 4);
@@ -128,7 +154,7 @@ class ChatService
 
     protected function answerWithLlm(string $question, string $context, string $system, float $temp, int $maxTokens): string
     {
-        // Clamps y defaults seguros sobre lo recibido
+        // Clamps seguros
         $temp = max(0.0, min(1.0, (float)$temp));
         $maxTokens = max(50, min(4000, (int)$maxTokens));
 
@@ -146,14 +172,12 @@ class ChatService
         return trim((string)$text) !== '' ? (string)$text : "No puedo responder con la información disponible.";
     }
 
-
     protected function fallbackFromChunks(array $hits, string $q): string
     {
         if (empty($hits)) {
-            return "No tengo esa info en las fuentes. ¿Querés que te proponga ideas de relax con termas y naturaleza, o preferís cultura y gastronomía?";
+            return "No tengo esa info en las fuentes. ¿Preferís ideas de relax con termas y naturaleza, o algo más cultural/gastronómico?";
         }
 
-        // Tomamos hasta 3 títulos/ideas sin listar “fuentes”
         $names = [];
         foreach (array_slice($hits, 0, 5) as $h) {
             $title = $h['metadata']['title'] ?? ($h['metadata']['file'] ?? null);
@@ -163,11 +187,7 @@ class ChatService
         $sugerencias = implode(' • ', array_slice($names, 0, 3));
 
         $base = "Para un finde de relax con termas y naturaleza en Entre Ríos, te puedo sugerir combinar paradas";
-        if ($sugerencias !== '') {
-            $base .= ": {$sugerencias}.";
-        } else {
-            $base .= ".";
-        }
+        $base .= $sugerencias !== '' ? ": {$sugerencias}." : ".";
         return $base . " ¿Querés que te arme un mini itinerario?";
     }
 
@@ -185,7 +205,7 @@ class ChatService
     {
         return [
             ['role' => 'system', 'content' => $system],
-            ['role' => 'user', 'content' => "Pregunta: {$question}\n\nCONTEXTO:\n{$context}\n\nFin del contexto."],
+            ['role' => 'user',   'content' => "Pregunta: {$question}\n\nCONTEXTO:\n{$context}\n\nFin del contexto."],
         ];
     }
 }
