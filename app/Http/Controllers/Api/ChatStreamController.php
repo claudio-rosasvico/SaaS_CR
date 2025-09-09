@@ -171,4 +171,12 @@ class ChatStreamController extends Controller
         }
         return array_values(array_unique($titles));
     }
+
+    private function buildMessages(string $system, string $question, string $context): array
+    {
+        return [
+            ['role' => 'system', 'content' => $system],
+            ['role' => 'user', 'content' => "Pregunta: {$question}\n\nCONTEXTO:\n{$context}\n\nFin del contexto."],
+        ];
+    }
 }

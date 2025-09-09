@@ -10,51 +10,71 @@ use App\Services\ChatService;
 
 class TelegramPoll extends Command
 {
-    protected $signature = 'telegram:poll {--once}';
-    protected $description = 'Long polling a Telegram Bot API (getUpdates)';
+    // app/Console/Commands/TelegramPoll.php
+    protected $signature = 'telegram:poll {orgId?} {--timeout=30}';
 
-    public function handle(ChatService $chat)
+    public function handle()
     {
-        $token = env('TELEGRAM_BOT_TOKEN');
-        if (!$token) { $this->error('TELEGRAM_BOT_TOKEN vacío'); return 1; }
+        $orgId = $this->argument('orgId');
+        if (!$orgId) {
+            $this->error('Usa: php artisan telegram:poll {orgId}');
+            return;
+        }
 
-        $offset = Cache::get('tg_offset', 0);
+        $ci = \App\Models\ChannelIntegration::where('organization_id', $orgId)
+            ->where('channel', 'telegram')->where('enabled', true)->first();
 
-        do {
-            $res = Http::timeout(35)->get("https://api.telegram.org/bot{$token}/getUpdates", [
-                'timeout' => 30,
-                'offset'  => $offset+1
+        $token = data_get($ci, 'config.token') ?? env('TELEGRAM_BOT_TOKEN');
+        if (!$token) {
+            $this->error("Sin token para org {$orgId}");
+            return;
+        }
+
+        $offset = $ci->config['last_update_id'] ?? null;
+        $timeout = (int) $this->option('timeout');
+
+        $this->info("Polling org={$orgId}...");
+
+        while (true) {
+            $resp = \Http::timeout($timeout + 5)->get("https://api.telegram.org/bot{$token}/getUpdates", [
+                'timeout' => $timeout,
+                'offset'  => $offset ? $offset + 1 : null,
             ]);
-            if (!$res->ok()) { usleep(500000); continue; }
 
-            $updates = $res->json('result') ?? [];
-            foreach ($updates as $u) {
-                $updateId = $u['update_id'];
-                $msg = $u['message'] ?? $u['edited_message'] ?? null;
-                if ($msg) {
-                    $chatId = $msg['chat']['id'] ?? null;
-                    $text   = $msg['text'] ?? '';
-                    if ($chatId && $text !== '') {
-                        $conv = Conversation::firstOrCreate(
-                            ['channel' => 'telegram', 'external_id' => (string)$chatId],
-                            ['started_at' => now()]
-                        );
-                        $resp = $chat->handle($conv->id, $text, 'telegram');
-                        $assistant = end($resp['messages']);
-                        Http::asForm()->post("https://api.telegram.org/bot{$token}/sendMessage", [
-                            'chat_id' => $chatId,
-                            'text' => $assistant['content'] ?? '...',
-                            'parse_mode' => 'HTML',
-                        ]);
-                    }
-                }
-                $offset = $updateId;
+            if (!$resp->ok()) {
+                sleep(2);
+                continue;
             }
 
-            Cache::put('tg_offset', $offset, 86400);
-            if ($this->option('once')) break;
-        } while(true);
+            foreach ($resp->json('result', []) as $u) {
+                $offset = $u['update_id'] ?? $offset;
+                // procesar mensaje...
+                $text = data_get($u, 'message.text');
+                $chatId = data_get($u, 'message.chat.id');
+                if (!$text || !$chatId) continue;
 
-        return 0;
+                // crea/usa conversación en esta org y canal 'telegram'
+                $conv = \App\Models\Conversation::firstOrCreate(
+                    ['organization_id' => $orgId, 'channel' => 'telegram', 'external_id' => (string)$chatId],
+                    ['started_at' => now()]
+                );
+
+                // delegá al ChatService / ChatStream (sin stream) o tu pipeline actual:
+                $svc = app(\App\Services\ChatService::class);
+                $res = $svc->handle($conv->id, $text, 'telegram');
+
+                // responde a Telegram
+                $reply = last($res['messages'])['content'] ?? '...';
+                \Http::asForm()->post("https://api.telegram.org/bot{$token}/sendMessage", [
+                    'chat_id' => $chatId,
+                    'text'    => $reply,
+                ]);
+            }
+
+            // guarda offset
+            $cfg = $ci->config;
+            $cfg['last_update_id'] = $offset;
+            $ci->update(['config' => $cfg]);
+        }
     }
 }

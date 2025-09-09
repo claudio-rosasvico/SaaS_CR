@@ -4,6 +4,8 @@ namespace App\Livewire\Panel;
 
 use Livewire\Component;
 use App\Models\Bot;
+use App\Models\ChannelIntegration;
+use Illuminate\Support\Facades\Log;
 
 class BotsIndex extends Component
 {
@@ -20,6 +22,8 @@ class BotsIndex extends Component
     public string $language = 'es';
     public bool $citations = false;
     public string $retrieval_mode = 'semantic';
+    public string $token = '';
+    public bool $modal = false;
 
     public function mount(): void
     {
@@ -36,7 +40,7 @@ class BotsIndex extends Component
     public function createNew(): void
     {
         $this->resetForm();
-        $this->dispatch('open-bot-modal');
+        $this->modal = true;
     }
 
     public function edit(int $id): void
@@ -52,21 +56,35 @@ class BotsIndex extends Component
         $this->max_tokens    = (int)   ($cfg['max_tokens'] ?? 350);
         $this->language      = (string)($cfg['language'] ?? 'es');
         $this->citations     = (bool)  ($cfg['citations'] ?? false);
-        $this->retrieval_mode= (string)($cfg['retrieval_mode'] ?? 'semantic');
+        $this->retrieval_mode = (string)($cfg['retrieval_mode'] ?? 'semantic');
 
-        $this->dispatch('open-bot-modal');
+        $this->token = '';
+        if ($this->channel === 'telegram') {
+            $ci = ChannelIntegration::where('organization_id', current_org_id())
+                ->where('channel', 'telegram')->first();
+            $this->token = (string) data_get($ci, 'config.token', '');
+        }
+
+        $this->modal = true;
     }
 
     public function save(): void
     {
-        $this->validate([
-            'name' => 'required|string|max:100',
-            'channel' => 'required|in:web,telegram,whatsapp',
-            'temperature' => 'numeric|min:0|max:1',
-            'max_tokens' => 'integer|min:64|max:2048',
-            'language' => 'required|string|max:10',
+        $rules = [
+            'name'           => 'required|string|max:100',
+            'channel'        => 'required|in:web,telegram,whatsapp',
+            'temperature'    => 'numeric|min:0|max:1',
+            'max_tokens'     => 'integer|min:64|max:2048',
+            'language'       => 'required|string|max:10',
             'retrieval_mode' => 'required|in:semantic,keyword',
-        ]);
+            'token'          => 'nullable|string|max:200',
+        ];
+        Log::info("Validacion 1 hecha");
+        if ($this->channel === 'telegram') {
+            $rules['token'] = 'required|string|max:200';
+        }
+        $this->validate($rules);
+        Log::info("Validacion confirmada");
 
         $data = [
             'organization_id' => current_org_id(),
@@ -79,7 +97,7 @@ class BotsIndex extends Component
                 'max_tokens'    => $this->max_tokens,
                 'language'      => $this->language,
                 'citations'     => $this->citations,
-                'retrieval_mode'=> $this->retrieval_mode,
+                'retrieval_mode' => $this->retrieval_mode,
             ],
         ];
 
@@ -89,16 +107,25 @@ class BotsIndex extends Component
         } else {
             $b = Bot::create($data);
         }
-
+        Log::info("Bot creado: " . $b);
+        if ($b->channel === 'telegram') {
+            ChannelIntegration::updateOrCreate(
+                ['organization_id' => current_org_id(), 'channel' => 'telegram'],
+                ['enabled' => true, 'config' => ['token' => $this->token]]
+            );
+        }
+        Log::info("Paso por el token");
         // Garantizar único default por canal
         if ($b->is_default) {
             Bot::where('organization_id', current_org_id())
-               ->where('channel', $b->channel)
-               ->where('id', '!=', $b->id)
-               ->update(['is_default' => false]);
+                ->where('channel', $b->channel)
+                ->where('id', '!=', $b->id)
+                ->update(['is_default' => false]);
         }
 
-        $this->dispatch('close-bot-modal');
+        cache()->forget('bot:' . current_org_id() . ':' . $b->channel);
+
+        $this->modal = false;
         $this->loadItems();
         session()->flash('ok', 'Bot guardado.');
     }
@@ -107,8 +134,8 @@ class BotsIndex extends Component
     {
         $b = Bot::where('organization_id', current_org_id())->findOrFail($id);
         Bot::where('organization_id', current_org_id())
-           ->where('channel', $b->channel)
-           ->update(['is_default' => false]);
+            ->where('channel', $b->channel)
+            ->update(['is_default' => false]);
         $b->is_default = true;
         $b->save();
         $this->loadItems();
@@ -133,6 +160,19 @@ class BotsIndex extends Component
         $this->language = 'es';
         $this->citations = false;
         $this->retrieval_mode = 'semantic';
+        $this->token = '';           // 👈 AÑADIR
+    }
+
+    public function updatedChannel(): void
+    {
+        // Si el user cambia canal a Telegram en el modal, pre-cargá token si existe
+        if ($this->channel === 'telegram') {
+            $ci = ChannelIntegration::where('organization_id', current_org_id())
+                ->where('channel', 'telegram')->first();
+            $this->token = (string) data_get($ci, 'config.token', '');
+        } else {
+            $this->token = '';
+        }
     }
 
     public function render()

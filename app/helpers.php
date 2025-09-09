@@ -62,7 +62,7 @@ if (! function_exists('ensure_default_bot')) {
         if ($bot) return $bot;
 
         // crear uno por defecto
-        return Bot::create([
+        $newBot = Bot::create([
             'organization_id' => $orgId,
             'name'   => 'Demo Web',
             'channel' => 'web',
@@ -75,40 +75,32 @@ if (! function_exists('ensure_default_bot')) {
                 'language'      => 'es',
             ],
         ]);
+        return $newBot;
     }
 }
 
 if (! function_exists('ensure_default_bot')) {
-    function ensure_default_bot(string $channel = 'web'): Bot
+    function ensure_default_bot(string $channel = 'web', ?int $orgId = null): \App\Models\Bot
     {
-        $orgId = current_org_id();
-        $bot = Bot::where('organization_id', $orgId)
-            ->where('channel', $channel)
-            ->where('is_default', true)
-            ->first();
+        $orgId = $orgId ?? current_org_id();
+        $key = "bot:{$orgId}:{$channel}";
 
-        if ($bot) return $bot;
-
-        // fallback al primero del canal
-        $bot = Bot::where('organization_id', $orgId)
-            ->where('channel', $channel)
-            ->orderBy('id')->first();
-        if ($bot) return $bot;
-
-        // crear uno por defecto para el canal
-        return Bot::create([
-            'organization_id' => $orgId,
-            'name'    => ucfirst($channel) . ' Bot',
-            'channel' => $channel,
-            'is_default' => true,
-            'config'  => [
-                'system_prompt' => "Eres un asistente de soporte que responde en español, claro y conciso. Usa SOLO el contexto proporcionado. Si no está, dilo.",
-                'temperature'   => 0.2,
-                'max_tokens'    => 350,
-                'language'      => 'es',
-                'retrieval_mode' => env('RETRIEVAL_MODE', 'semantic'),
-                'citations'     => false,
-            ],
-        ]);
+        return cache()->remember($key, 30, function () use ($orgId, $channel) {
+            return \App\Models\Bot::firstOrCreate(
+                ['organization_id' => $orgId, 'channel' => $channel],
+                [
+                    'system_prompt' => "Eres un asistente de soporte. Responde SOLO con el CONTEXTO.",
+                    'temperature'   => (float) env('LLM_TEMPERATURE', 0.2),
+                    'max_tokens'    => (int)   env('LLM_MAX_TOKENS', 500),
+                ]
+            );
+        });
     }
+}
+
+function telegram_token_for_org(int $orgId): ?string
+{
+    $ci = \App\Models\ChannelIntegration::where('organization_id', $orgId)
+        ->where('channel', 'telegram')->where('enabled', true)->first();
+    return $ci->config['token'] ?? null;
 }

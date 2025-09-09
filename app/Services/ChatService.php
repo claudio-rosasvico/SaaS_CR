@@ -16,19 +16,20 @@ class ChatService
 
     public function handle(?int $conversationId, string $userText, string $channel = 'web'): array
     {
+        $bot = ensure_default_bot($channel);
         $conversation = $conversationId
             ? Conversation::findOrFail($conversationId)
             : Conversation::create([
                 'channel'          => $channel,
                 'started_at'       => now(),
                 'organization_id'  => current_org_id(),
-                'bot_id'           => ensure_default_bot()->id,
+                'bot_id'           => isset($bot) && isset($bot->id) ? $bot->id : null,
             ]);
 
         // Asegurar bot asignado
         $bot = $conversation->bot_id
             ? Bot::find($conversation->bot_id)
-            : ensure_default_bot();
+            : ensure_default_bot($conversation->channel);
 
         if (!$conversation->bot_id && $bot) {
             $conversation->bot_id = $bot->id;
@@ -62,16 +63,25 @@ class ChatService
         if ($citations) {
             $rules .= "\n- Cuando corresponda, cita la fuente por título entre [corchetes].";
         }
-        $system = $persona !== '' ? ($persona."\n\nReglas:\n".$rules) : ("Asistente útil.\n\nReglas:\n".$rules);
+        $system = $persona !== '' ? ($persona . "\n\nReglas:\n" . $rules) : ("Asistente útil.\n\nReglas:\n" . $rules);
 
         try {
             $reply = $this->answerWithLlm($userText, $context, $system, $temp, $maxTokens);
             $usedProvider = env('LLM_PROVIDER', 'ollama');
-            $usedModel    = match ($usedProvider) {
-                'openai' => env('OPENAI_MODEL'),
-                'gemini' => env('GEMINI_MODEL'),
-                default  => env('OLLAMA_MODEL'),
-            } ?? 'unknown';
+            switch ($usedProvider) {
+                case 'openai':
+                    $usedModel = env('OPENAI_MODEL');
+                    break;
+                case 'gemini':
+                    $usedModel = env('GEMINI_MODEL');
+                    break;
+                default:
+                    $usedModel = env('OLLAMA_MODEL');
+                    break;
+            }
+            if (!$usedModel) {
+                $usedModel = 'unknown';
+            }
         } catch (\Throwable $e) {
             \Log::error('LLM fallo', ['error' => $e->getMessage()]);
             $reply        = $this->fallbackFromChunks($hits, $userText);
@@ -118,35 +128,47 @@ class ChatService
 
     protected function answerWithLlm(string $question, string $context, string $system, float $temp, int $maxTokens): string
     {
+        // Clamps y defaults seguros sobre lo recibido
+        $temp = max(0.0, min(1.0, (float)$temp));
+        $maxTokens = max(50, min(4000, (int)$maxTokens));
+
         if (trim($context) === '') {
-            return "No encontré información en tus fuentes para “{$question}”. Probá subir documentos o ajustar la pregunta.";
+            return "No tengo esa info en las fuentes. ¿Querés que te sugiera algunas opciones en Entre Ríos según tu estilo de viaje?";
         }
 
-        $messages = [
-            ['role' => 'system', 'content' => $system],
-            ['role' => 'user',   'content' => "Pregunta: {$question}\n\nCONTEXTO:\n{$context}\n\nFin del contexto."],
-        ];
+        $messages = $this->buildMessages($system, $question, $context);
 
         $text = $this->llm->generate($messages, [
             'temperature' => $temp,
             'max_tokens'  => $maxTokens,
         ]);
 
-        return trim($text) !== '' ? $text : "No puedo responder con la información disponible.";
+        return trim((string)$text) !== '' ? (string)$text : "No puedo responder con la información disponible.";
     }
+
 
     protected function fallbackFromChunks(array $hits, string $q): string
     {
         if (empty($hits)) {
-            return "No encontré información en tus fuentes para “{$q}”.";
+            return "No tengo esa info en las fuentes. ¿Querés que te proponga ideas de relax con termas y naturaleza, o preferís cultura y gastronomía?";
         }
-        $lines = ["Según tus fuentes encontré:"];
-        foreach (array_slice($hits, 0, 3) as $h) {
-            $title = $h['metadata']['title'] ?? ($h['metadata']['file'] ?? 'Fuente');
-            $txt   = trim(mb_strimwidth(preg_replace('/\s+/', ' ', $h['content']), 0, 240, '…'));
-            $lines[] = "• {$title}: {$txt}";
+
+        // Tomamos hasta 3 títulos/ideas sin listar “fuentes”
+        $names = [];
+        foreach (array_slice($hits, 0, 5) as $h) {
+            $title = $h['metadata']['title'] ?? ($h['metadata']['file'] ?? null);
+            if ($title) $names[] = trim($title);
         }
-        return implode("\n", $lines);
+        $names = array_values(array_unique(array_filter($names)));
+        $sugerencias = implode(' • ', array_slice($names, 0, 3));
+
+        $base = "Para un finde de relax con termas y naturaleza en Entre Ríos, te puedo sugerir combinar paradas";
+        if ($sugerencias !== '') {
+            $base .= ": {$sugerencias}.";
+        } else {
+            $base .= ".";
+        }
+        return $base . " ¿Querés que te arme un mini itinerario?";
     }
 
     protected function titlesOnly(array $hits): array
@@ -157,5 +179,13 @@ class ChatService
         }
         $titles = array_values(array_unique($titles));
         return array_map(fn($t) => ['title' => $t], $titles);
+    }
+
+    private function buildMessages(string $system, string $question, string $context): array
+    {
+        return [
+            ['role' => 'system', 'content' => $system],
+            ['role' => 'user', 'content' => "Pregunta: {$question}\n\nCONTEXTO:\n{$context}\n\nFin del contexto."],
+        ];
     }
 }
