@@ -70,6 +70,9 @@ class ChatService
         $maxTokens = (int)   ($cfg['max_tokens']   ?? env('LLM_MAX_TOKENS', 500));
         $lang      = (string)($cfg['language']     ?? 'es');
         $citations = (bool)  ($cfg['citations']    ?? false);
+        $cfg          = $bot->config ?? [];
+        $presentation = $cfg['presentation']   ?? [];
+        $fallbackCopy = $cfg['fallback_copy']  ?? [];
 
         $rules = "- Usá SOLO el CONTEXTO proporcionado.\n- Si la información no está, decilo y ofrecé alternativas.\n- Respondé en {$lang} con tono cercano y propositivo.";
         if ($citations) {
@@ -86,7 +89,7 @@ class ChatService
             'channel' => $channelUsed,
             'temp'    => $temp,
             'maxTok'  => $maxTokens,
-            'sys_head'=> mb_substr($system, 0, 160),
+            'sys_head' => mb_substr($system, 0, 160),
         ]);
 
         // 6) LLM
@@ -106,10 +109,9 @@ class ChatService
                     break;
             }
             $usedModel = $usedModel ?: 'unknown';
-
         } catch (\Throwable $e) {
             \Log::error('LLM fallo', ['error' => $e->getMessage()]);
-            $reply        = $this->fallbackFromChunks($hits, $userText);
+            $reply        = $this->fallbackFromChunks($hits, $userText, $presentation, $fallbackCopy);
             $usedProvider = 'fallback';
             $usedModel    = 'fragments';
         }
@@ -172,23 +174,44 @@ class ChatService
         return trim((string)$text) !== '' ? (string)$text : "No puedo responder con la información disponible.";
     }
 
-    protected function fallbackFromChunks(array $hits, string $q): string
-    {
-        if (empty($hits)) {
-            return "No tengo esa info en las fuentes. ¿Preferís ideas de relax con termas y naturaleza, o algo más cultural/gastronómico?";
-        }
+    protected function fallbackFromChunks(
+        array $hits,
+        string $q,
+        ?array $presentation = null,
+        ?array $copy = null
+    ): string {
+        // Defaults neutros
+        $pres = array_replace_recursive([
+            'hide_urls'       => true,
+            'hide_file_names' => true,
+            'aliases'         => ['domains' => [], 'files' => []],
+            'max_items'       => 3,
+        ], $presentation ?? []);
 
+        // Textos de UI configurables por bot
+        $cx = array_replace([
+            'empty'   => 'No encontré suficiente información en tus fuentes sobre eso.',
+            'intro'   => 'Puedo proponerte opciones relacionadas',
+            'joiner'  => ', ',
+            'closure' => '¿Querés que detalle alguna?',
+        ], $copy ?? []);
+
+        $presenter = app(\App\Services\SourcePresenter::class);
+
+        // Tomar nombres "bonitos" de los hits según política
         $names = [];
-        foreach (array_slice($hits, 0, 5) as $h) {
-            $title = $h['metadata']['title'] ?? ($h['metadata']['file'] ?? null);
-            if ($title) $names[] = trim($title);
+        foreach ($hits as $h) {
+            $nice = $presenter->present($h, $pres);
+            if ($nice) $names[] = $nice;
+            if (count($names) >= (int)$pres['max_items']) break;
         }
-        $names = array_values(array_unique(array_filter($names)));
-        $sugerencias = implode(' • ', array_slice($names, 0, 3));
+        $names = array_values(array_unique($names));
 
-        $base = "Para un finde de relax con termas y naturaleza en Entre Ríos, te puedo sugerir combinar paradas";
-        $base .= $sugerencias !== '' ? ": {$sugerencias}." : ".";
-        return $base . " ¿Querés que te arme un mini itinerario?";
+        if (empty($names)) {
+            return $cx['empty'];
+        }
+
+        return $cx['intro'] . ': ' . implode($cx['joiner'], $names) . '. ' . $cx['closure'];
     }
 
     protected function titlesOnly(array $hits): array

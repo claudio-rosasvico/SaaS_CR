@@ -6,6 +6,7 @@ use Livewire\Component;
 use App\Models\Bot;
 use App\Models\ChannelIntegration;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\ValidationException;
 
 class BotsIndex extends Component
 {
@@ -24,6 +25,12 @@ class BotsIndex extends Component
     public string $retrieval_mode = 'semantic';
     public string $token = '';
     public bool $modal = false;
+    public bool $presentation_hide_urls  = true;
+    public bool $presentation_hide_files = true;
+    public int  $presentation_max_items  = 3;
+    public string $presentation_domains_json = ''; // JSON dominio→alias
+    public string $presentation_files_json   = ''; // JSON regex→alias
+    public string $presentation_closure      = '¿Querés que te arme un mini itinerario?';
 
     public function mount(): void
     {
@@ -58,6 +65,17 @@ class BotsIndex extends Component
         $this->citations     = (bool)  ($cfg['citations'] ?? false);
         $this->retrieval_mode = (string)($cfg['retrieval_mode'] ?? 'semantic');
 
+        $pres = (array) ($b->config['presentation'] ?? []);
+        $this->presentation_hide_urls  = (bool)($pres['hide_urls']       ?? true);
+        $this->presentation_hide_files = (bool)($pres['hide_file_names'] ?? true);
+        $this->presentation_max_items  = (int) ($pres['max_items']       ?? 3);
+        $this->presentation_closure    = (string)($pres['fallback_closure'] ?? '¿Querés que te arme un mini itinerario?');
+
+        $domains = (array)($pres['aliases']['domains'] ?? []);
+        $files   = (array)($pres['aliases']['files']   ?? []);
+        $this->presentation_domains_json = $domains ? json_encode($domains, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) : '';
+        $this->presentation_files_json   = $files   ? json_encode($files,   JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) : '';
+
         $this->token = '';
         if ($this->channel === 'telegram') {
             $ci = ChannelIntegration::where('organization_id', current_org_id())
@@ -78,6 +96,10 @@ class BotsIndex extends Component
             'language'       => 'required|string|max:10',
             'retrieval_mode' => 'required|in:semantic,keyword',
             'token'          => 'nullable|string|max:200',
+            'presentation_max_items' => 'integer|min:1|max:10',
+            'presentation_closure'   => 'nullable|string|max:200',
+            'presentation_domains_json' => 'nullable|string',
+            'presentation_files_json'   => 'nullable|string',
         ];
         Log::info("Validacion 1 hecha");
         if ($this->channel === 'telegram') {
@@ -85,6 +107,20 @@ class BotsIndex extends Component
         }
         $this->validate($rules);
         Log::info("Validacion confirmada");
+
+        $domains = $this->parseJsonMap($this->presentation_domains_json, 'presentation_domains_json');
+        $files   = $this->parseJsonMap($this->presentation_files_json,   'presentation_files_json');
+
+        $presentation = [
+            'hide_urls'        => (bool)$this->presentation_hide_urls,
+            'hide_file_names'  => (bool)$this->presentation_hide_files,
+            'max_items'        => (int)$this->presentation_max_items,
+            'fallback_closure' => (string)($this->presentation_closure ?? ''),
+            'aliases' => [
+                'domains' => $domains,
+                'files'   => $files,
+            ],
+        ];
 
         $data = [
             'organization_id' => current_org_id(),
@@ -161,6 +197,35 @@ class BotsIndex extends Component
         $this->citations = false;
         $this->retrieval_mode = 'semantic';
         $this->token = '';           // 👈 AÑADIR
+        $this->presentation_hide_urls  = true;
+        $this->presentation_hide_files = true;
+        $this->presentation_max_items  = 3;
+        $this->presentation_domains_json = '';
+        $this->presentation_files_json   = '';
+        $this->presentation_closure      = '¿Querés que te arme un mini itinerario?';
+    }
+
+    private function parseJsonMap(?string $json, string $field): array
+    {
+        $json = trim((string)$json);
+        if ($json === '') return [];
+        $data = json_decode($json, true);
+        if (!is_array($data)) {
+            throw ValidationException::withMessages([
+                $field => 'Debes ingresar un JSON objeto clave→valor válido (ej: {"dominio.com":"Alias bonito"}).',
+            ]);
+        }
+        $out = [];
+        foreach ($data as $k => $v) {
+            if (!is_string($k)) {
+                throw ValidationException::withMessages([$field => 'Las claves deben ser texto.']);
+            }
+            if (!is_string($v) && !is_numeric($v)) {
+                throw ValidationException::withMessages([$field => 'Los valores deben ser texto.']);
+            }
+            $out[(string)$k] = (string)$v;
+        }
+        return $out;
     }
 
     public function updatedChannel(): void
