@@ -1,0 +1,143 @@
+:root {
+    /* Brand */
+    --brand-primary: #f99f13;
+    --brand-dark: #18252d;
+
+    /* Derivados */
+    --brand-primary-600: #e38f10;
+    --brand-primary-700: #c87e0f;
+    --brand-dark-700: #121a20;
+
+    /* UI */
+    --bg-body: #f7f9fb;
+    --text-body: #18252d;
+    --card-bg: #ffffff;
+    --card-border: #e5e7eb;
+    --muted: #6b7280;
+
+    /* Componentes */
+    --sidebar-bg: #18252d;
+    --sidebar-text: #cbd5e1;
+    --sidebar-text-active: #ffffff;
+
+    --btn-radius: 10px;
+    --chip-radius: 999px;
+}
+
+/* -------- Body y tipografía -------- */
+html,
+body {
+    height: 100%;
+}
+
+body {
+    background: var(--bg-body);
+    color: var(--text-body);
+}
+
+/* -------- Navbar -------- */
+.navbar-brand img {
+    height: 26px;
+}
+
+.navbar-brand strong {
+    color: var(--brand-dark);
+}
+
+.navbar {
+    background: #fff !important;
+    border-bottom: 1px solid var(--card-border);
+}
+
+/* -------- Sidebar simple -------- */
+.cb-sidebar {
+    background: var(--sidebar-bg);
+    color: var(--sidebar-text);
+    min-height: 100vh;
+}
+
+.cb-sidebar a {
+    color: var(--sidebar-text);
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-radius: 8px;
+}
+
+.cb-sidebar a.active,
+.cb-sidebar a:hover {
+    background: rgba(249, 159, 19, 0.18);
+    color: var(--sidebar-text-active);
+}
+
+/* -------- Cards -------- */
+.card {
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 14px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, .04);
+}
+
+/* -------- Botones -------- */
+.btn-primary {
+    background: var(--brand-primary);
+    border-color: var(--brand-primary);
+    border-radius: var(--btn-radius);
+}
+
+.btn-primary:hover {
+    background: var(--brand-primary-600);
+    border-color: var(--brand-primary-600);
+}
+
+.btn-outline-primary {
+    color: var(--brand-primary);
+    border-color: var(--brand-primary);
+    border-radius: var(--btn-radius);
+}
+
+.btn-outline-primary:hover {
+    color: #fff;
+    background: var(--brand-primary);
+    border-color: var(--brand-primary);
+}
+
+/* -------- Badges -------- */
+.badge.brand {
+    background: rgba(249, 159, 19, .15);
+    color: var(--brand-primary);
+    border-radius: var(--chip-radius);
+    padding: .4rem .7rem;
+    font-weight: 600;
+}
+
+/* -------- Inputs -------- */
+.form-control:focus,
+.form-select:focus {
+    border-color: var(--brand-primary);
+    box-shadow: 0 0 0 .2rem rgba(249, 159, 19, .15);
+}
+
+/* -------- Links -------- */
+a {
+    color: var(--brand-primary);
+}
+
+a:hover {
+    color: var(--brand-primary-700);
+}
+
+/* -------- Tabla “clean” -------- */
+.table thead th {
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: .02em;
+    font-size: .8rem;
+    border-bottom: 1px solid var(--card-border);
+}
+
+.table td {
+    vertical-align: middle;
+}

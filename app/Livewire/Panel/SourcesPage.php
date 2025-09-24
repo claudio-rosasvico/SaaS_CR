@@ -76,6 +76,7 @@ class SourcesPage extends Component
         // si querés el conteo de chunks, podés sumar ->withCount('chunks')
         $sources = Source::orderByDesc('id')->paginate(10);
 
-        return view('livewire.panel.sources-page', compact('sources'));
+        return view('livewire.panel.sources-page', compact('sources'))
+        ->layout('panel.layout', ['title' => 'Fuentes']);
     }
 }

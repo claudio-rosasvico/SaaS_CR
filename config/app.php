@@ -186,4 +186,6 @@ return [
         // 'Example' => App\Facades\Example::class,
     ])->toArray(),
 
+    'logo_url' => env('APP_LOGO_URL', null),
+
 ];

@@ -4,64 +4,149 @@ namespace App\Services;
 
 class SourcePresenter
 {
-    public function present(array $hit, array $policy = []): ?string
+    /**
+     * $hit: ['content'=>..., 'metadata'=> ['title'=>?, 'file'=>?, 'url'=>?, 'domain'=>?]]
+     * $cfg:
+     *   - citations (bool)
+     *   - presentation => [
+     *       hide_urls (bool), hide_file_names (bool),
+     *       max_suggestions (int),
+     *       aliases => [
+     *         'domains' => ['dominio' => 'Alias legible'],
+     *         'files'   => ['~/regex/i' => 'Alias legible']
+     *       ]
+     *     ]
+     */
+    public function citations(array $hits, array $cfg): array
     {
-        $title = $hit['metadata']['title'] ?? ($hit['metadata']['file'] ?? '');
-        $title = trim((string)$title);
-        if ($title === '') return null;
+        if (!($cfg['citations'] ?? false)) {
+            return [];
+        }
 
-        $pres = array_replace_recursive([
-            'hide_urls'       => true,
-            'hide_file_names' => true,
-            'aliases'         => ['domains' => [], 'files' => []],
-        ], $policy);
+        $pres = (array)($cfg['presentation'] ?? []);
+        $limit = (int)($pres['max_suggestions'] ?? 3);
 
-        // URL → nombre
-        if (preg_match('~^https?://~i', $title)) {
-            if (!empty($pres['hide_urls'])) {
-                $host = parse_url($title, PHP_URL_HOST) ?: '';
-                $host = strtolower($host);
+        $labels = [];
+        foreach ($hits as $h) {
+            $label = $this->present($h, $pres);
+            if ($label && $label !== 'una fuente verificada') {
+                $labels[] = $label;
+            }
+            if (count($labels) >= $limit) break;
+        }
+        $labels = array_values(array_unique($labels));
 
-                // alias directo por dominio
-                if (isset($pres['aliases']['domains'][$host])) {
-                    return $pres['aliases']['domains'][$host];
+        return array_map(fn($t) => ['title' => $t], $labels);
+    }
+
+    public function fallback(array $hits, array $cfg): string
+    {
+        $pres  = (array)($cfg['presentation'] ?? []);
+        $limit = (int)($pres['max_suggestions'] ?? 3);
+
+        $labels = [];
+        foreach ($hits as $h) {
+            $label = $this->present($h, $pres);
+            if ($label && $label !== 'una fuente verificada') {
+                $labels[] = $label;
+            }
+            if (count($labels) >= $limit) break;
+        }
+        $labels = array_values(array_unique($labels));
+
+        if (count($labels) > 0) {
+            $list = implode(' • ', $labels);
+            return "Te propongo estas opciones: {$list}. ¿Querés que te arme un mini itinerario?";
+        }
+
+        return "Puedo orientarte con ideas según tu estilo (relax, naturaleza, termas). ¿Preferís algo tranquilo y familiar, o más activo con caminatas?";
+    }
+
+    /**
+     * Retorna un nombre “presentable” para la fuente, evitando URLs crudas y filenames,
+     * con soporte de alias por dominio/regex de archivo.
+     */
+    public function present(array $hit, array $pres): ?string
+    {
+        $meta   = $hit['metadata'] ?? [];
+        $title  = (string) ($meta['title'] ?? '');
+        $file   = (string) ($meta['file']  ?? '');
+        $url    = (string) ($meta['url']   ?? '');
+        $domain = (string) ($meta['domain']?? $this->extractDomain($url));
+
+        $hideUrls      = (bool) ($pres['hide_urls'] ?? true);
+        $hideFileNames = (bool) ($pres['hide_file_names'] ?? true);
+
+        $aliases       = (array)($pres['aliases'] ?? []);
+        $domainAliases = (array)($aliases['domains'] ?? []);
+        $fileAliases   = (array)($aliases['files']   ?? []);
+
+        // 1) Alias por dominio
+        if ($domain && isset($domainAliases[$domain])) {
+            return trim($domainAliases[$domain]);
+        }
+
+        // 2) Alias por filename con regex
+        $baseName = $this->basenameLike($title) ?: $this->basenameLike($file);
+        if ($baseName) {
+            foreach ($fileAliases as $regex => $alias) {
+                try {
+                    if (@preg_match($regex, $baseName) && preg_match($regex, $baseName)) {
+                        return trim($alias);
+                    }
+                } catch (\Throwable $e) {
+                    // regex inválida → ignorar
                 }
-
-                // heurística genérica
-                $base = preg_replace('/^(www\.|portal\.)/i', '', $host);
-                $base = explode('.', $base)[0] ?? '';
-                $base = preg_replace('/(entrerios|tur|gob|municipio|ciudad)$/i', '', $base);
-                $base = str_replace(['-', '_'], ' ', $base);
-                $base = trim($base);
-                if ($base === '') return null;
-
-                return mb_convert_case($base, MB_CASE_TITLE, 'UTF-8');
-            }
-            // si no ocultás URLs, devolvé el host “bonito”
-            return parse_url($title, PHP_URL_HOST) ?? $title;
-        }
-
-        // Archivo → limpio nombre
-        $name = $title;
-        if ($pres['hide_file_names']) {
-            $name = preg_replace('/\.(pdf|docx?|xlsx?|pptx?)$/i', '', $name);
-            $name = preg_replace('/^(final|borrador|version|v\d+|mr)\W*/i', '', $name);
-            $name = preg_replace('/[_-]+/', ' ', $name);
-            $name = trim($name);
-        }
-
-        // alias por patrón simple (archivo/título)
-        foreach ($pres['aliases']['files'] as $pattern => $replacement) {
-            if (@preg_match('/' . $pattern . '/i', $name)) {
-                return $replacement;
             }
         }
 
-        // filtrito genérico
-        if (preg_match('/localidades/i', $name)) {
-            return 'varias localidades';
+        // 3) Título humano si no parece URL ni filename
+        if ($title && !$this->looksLikeFileName($title) && !$this->looksLikeUrl($title)) {
+            return trim($title);
         }
 
-        return $name !== '' ? mb_convert_case($name, MB_CASE_TITLE, 'UTF-8') : null;
+        // 4) Si no ocultamos URL y tenemos dominio, devolvemos algo amable
+        if (!$hideUrls && $domain) {
+            return "sitio oficial de {$domain}";
+        }
+
+        // 5) Si no ocultamos filenames y tenemos uno
+        if ($baseName && !$hideFileNames) {
+            return $baseName;
+        }
+
+        // 6) Ultra neutro
+        return "una fuente verificada";
+    }
+
+    private function extractDomain(string $url): string
+    {
+        if (!$url) return '';
+        $h = parse_url($url, PHP_URL_HOST);
+        return $h ? preg_replace('/^www\./i', '', $h) : '';
+    }
+
+    private function looksLikeUrl(string $s): bool
+    {
+        return (bool) preg_match('~^https?://~i', $s);
+    }
+
+    private function looksLikeFileName(string $s): bool
+    {
+        return (bool) preg_match('/\.(pdf|docx?|pptx?|xlsx?|txt)$/i', $s);
+    }
+
+    private function basenameLike(string $s): ?string
+    {
+        if (!$s) return null;
+        if ($this->looksLikeUrl($s)) {
+            $path = parse_url($s, PHP_URL_PATH) ?? '';
+            $bn = trim(basename($path), '/');
+            return $bn ?: null;
+        }
+        if ($this->looksLikeFileName($s)) {
+            return $s;
+        }
+        return null;
     }
 }

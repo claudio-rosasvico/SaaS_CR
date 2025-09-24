@@ -16,14 +16,13 @@ class EmbedChunkJob implements ShouldQueue
 
     public function __construct(public int $chunkId) {}
 
-    public function handle(\App\Services\EmbeddingService $emb): void
+    public function handle(EmbeddingService $emb): void
     {
-        $chunk = \App\Models\KnowledgeChunk::find($this->chunkId);
-        if (!$chunk) return;
-        if (!empty($chunk->embedding)) return;
+        $chunk = KnowledgeChunk::findOrFail($this->chunkId);
+        $vec = $emb->embed($chunk->content);
+        if (!$vec) throw new \RuntimeException('Embedding vacío');
 
-        $vec = $emb->embed($chunk->content);     // 🔌 llama a Ollama embeddings
-        $chunk->embedding   = $vec;              // guarda JSON
+        $chunk->embedding = json_encode($vec);
         $chunk->embedded_at = now();
         $chunk->save();
 

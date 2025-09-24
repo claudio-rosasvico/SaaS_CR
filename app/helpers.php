@@ -1,51 +1,54 @@
 <?php
 
-use Illuminate\Support\Facades\Auth;
 use App\Models\Bot;
 
-if (! function_exists('current_org_id')) {
-    /**
-     * Devuelve el ID de la organización “activa”.
-     *
-     * Prioridad:
-     * 1) Usuario autenticado -> users.current_organization_id
-     * 2) Contexto “tenant” seteado en runtime (p. ej., desde Telegram/WhatsApp)
-     * 3) Fallback de .env: ORG_DEFAULT_ID (por defecto 1)
-     */
-    function current_org_id(?int $fallback = null): ?int
-    {
-        // 1) Usuario logueado
-        if (Auth::check() && Auth::user()->current_organization_id) {
-            return (int) Auth::user()->current_organization_id;
-        }
-
-        // 2) Contexto seteado a mano (útil en controladores de canales)
-        if (app()->bound('tenant.org_id')) {
-            return (int) app('tenant.org_id');
-        }
-
-        // 3) Fallback
-        $envFallback = (int) env('ORG_DEFAULT_ID', 1);
-        return $fallback !== null ? $fallback : $envFallback;
+/**
+ * Fuerza una organización “temporal” (útil en procesos sin sesión, ej. Telegram/CLI).
+ */
+function with_org(int $orgId, callable $fn)
+{
+    $prev = app()->has('forced_org') ? app('forced_org') : null;
+    app()->instance('forced_org', $orgId);
+    try {
+        return $fn();
+    } finally {
+        app()->forgetInstance('forced_org');
+        if ($prev !== null) app()->instance('forced_org', $prev);
     }
 }
 
+/**
+ * Devuelve el org actual.
+ * Orden recomendado:
+ * 1) forced_org (CLI/bots) → 2) user autenticado → 3) session
+ */
+if (! function_exists('current_org_id')) {
+    function current_org_id(): ?int
+    {
+        if (app()->has('forced_org')) {
+            return (int) app('forced_org');
+        }
+        if (auth()->check()) {
+            return auth()->user()->current_organization_id;
+        }
+        return session('current_organization_id');
+    }
+}
+
+/**
+ * Setea el org “en caliente” (por si querés hacerlo manualmente en controladores).
+ */
 if (! function_exists('set_tenant_org_id')) {
-    /**
-     * Setea el contexto de organización “en caliente” para esta request/proceso.
-     * Útil en controladores de Telegram/WhatsApp antes de crear/consultar registros.
-     */
     function set_tenant_org_id(int $orgId): void
     {
         app()->instance('tenant.org_id', $orgId);
     }
 }
 
+/**
+ * Devuelve instancia de Organization (si querés).
+ */
 if (! function_exists('current_org')) {
-    /**
-     * Retorna la organización actual (o null si no existe).
-     * Evitá usarlo en hot-paths si no tenés cache; para la mayoría de casos basta current_org_id().
-     */
     function current_org(): ?\App\Models\Organization
     {
         $id = current_org_id();
@@ -53,54 +56,86 @@ if (! function_exists('current_org')) {
     }
 }
 
-
+/**
+ * Garantiza que exista un bot default por canal/org y lo devuelve.
+ * Además setea defaults **seguros** en config, incluyendo presentación.
+ */
 if (! function_exists('ensure_default_bot')) {
-    function ensure_default_bot(): Bot
+    function ensure_default_bot(?string $channel = 'web', ?int $orgId = null): \App\Models\Bot
     {
-        $orgId = current_org_id();
-        $bot = Bot::where('organization_id', $orgId)->orderBy('id')->first();
-        if ($bot) return $bot;
+        $orgId = $orgId ?: current_org_id();
 
-        // crear uno por defecto
-        $newBot = Bot::create([
-            'organization_id' => $orgId,
-            'name'   => 'Demo Web',
-            'channel' => 'web',
-            'config' => [
-                'system_prompt' => "Eres un asistente de soporte que responde en español, claro y conciso. Prioriza la información de las FUENTES proporcionadas. Si falta información en el contexto, dilo explícitamente y sugiere qué documento subir.",
-                'temperature'   => 0.2,
-                'max_tokens'    => 400,
-                'retrieval_mode' => env('RETRIEVAL_MODE', 'semantic'),
-                'citations'     => false,  // si luego querés forzar que cite
-                'language'      => 'es',
+        $bot = Bot::where('organization_id', $orgId)
+            ->where('channel', $channel)
+            ->where('is_default', true)
+            ->first();
+
+        if ($bot) {
+            return $bot;
+        }
+
+        return Bot::firstOrCreate(
+            [
+                'organization_id' => $orgId,
+                'channel'         => $channel,
+                'name'            => ucfirst($channel) . ' default',
             ],
-        ]);
-        return $newBot;
+            [
+                'is_default' => true,
+                'config'     => [
+                    'language'       => 'es',
+                    'citations'      => false,
+                    'max_tokens'     => 400,
+                    'temperature'    => 0.2,
+                    'system_prompt'  => 'Asistente útil que usa SOLO el contexto. Si no está, dilo.',
+                    'retrieval_mode' => env('RETRIEVAL_MODE', 'semantic'),
+                    'presentation'   => [
+                        'hide_urls'                => true,
+                        'hide_file_names'          => true,
+                        'max_fallback_suggestions' => 3,
+                        'aliases' => [
+                            'domains' => [],
+                            'files'   => [],
+                        ],
+                        'closing_line' => null,
+                    ],
+                ],
+            ]
+        );
     }
 }
 
-if (! function_exists('ensure_default_bot')) {
-    function ensure_default_bot(string $channel = 'web', ?int $orgId = null): \App\Models\Bot
+/**
+ * Token de Telegram de una org (desde ChannelIntegration).
+ */
+if (! function_exists('telegram_token_for_org')) {
+    function telegram_token_for_org(int $orgId): ?string
     {
-        $orgId = $orgId ?? current_org_id();
-        $key = "bot:{$orgId}:{$channel}";
+        $ci = \App\Models\ChannelIntegration::where('organization_id', $orgId)
+            ->where('channel', 'telegram')
+            ->where('enabled', true)
+            ->first();
 
-        return cache()->remember($key, 30, function () use ($orgId, $channel) {
-            return \App\Models\Bot::firstOrCreate(
-                ['organization_id' => $orgId, 'channel' => $channel],
-                [
-                    'system_prompt' => "Eres un asistente de soporte. Responde SOLO con el CONTEXTO.",
-                    'temperature'   => (float) env('LLM_TEMPERATURE', 0.2),
-                    'max_tokens'    => (int)   env('LLM_MAX_TOKENS', 500),
-                ]
-            );
-        });
+        return $ci ? (string) data_get($ci->config, 'token', null) : null;
     }
 }
 
-function telegram_token_for_org(int $orgId): ?string
-{
-    $ci = \App\Models\ChannelIntegration::where('organization_id', $orgId)
-        ->where('channel', 'telegram')->where('enabled', true)->first();
-    return $ci->config['token'] ?? null;
+if (! function_exists('bot_by_key')) {
+    function bot_by_key(string $key): ?\App\Models\Bot
+    {
+        return \App\Models\Bot::where('public_key', $key)
+            ->where('is_embeddable', true)->first();
+    }
 }
+
+if (! function_exists('bot_by_public_key')) {
+    function bot_by_public_key(string $publicKey): ?\App\Models\Bot {
+        /** @var \App\Models\Bot|null $bot */
+        $bot = \App\Models\Bot::where('channel', 'web')
+            ->where('public_key', $publicKey)
+            ->first();
+
+        return $bot;
+    }
+}
+

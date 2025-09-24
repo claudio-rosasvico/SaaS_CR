@@ -6,154 +6,162 @@ use Illuminate\Support\Facades\Http;
 
 class LlmGateway
 {
+    /**
+     * Generación no-stream.
+     * @param array $messages  Conversación estilo OpenAI: [['role'=>'system'|'user'|'assistant','content'=>'...'], ...]
+     * @param array $opts      ['temperature'=>float, 'max_tokens'=>int, ...]
+     */
     public function generate(array $messages, array $opts = []): string
     {
         $provider = env('LLM_PROVIDER', 'ollama');
 
-        switch ($provider) {
-            case 'openai':
-                return $this->openai($messages, $opts);
-            case 'gemini':
-                return $this->gemini($messages, $opts);
-            case 'ollama':
-                return $this->ollama($messages, $opts);
-            default:
-                throw new \RuntimeException("LLM_PROVIDER no soportado: $provider");
+        try {
+            return match ($provider) {
+                'openai' => $this->openaiGenerate($messages, $opts),
+                'gemini' => $this->geminiGenerate($messages, $opts), // stub seguro
+                default  => $this->ollamaGenerate($messages, $opts), // ollama
+            };
+        } catch (\Throwable $e) {
+            \Log::error('LLM generate failed', ['provider' => $provider, 'error' => $e->getMessage()]);
+            // SIEMPRE devolvemos string
+            return '';
         }
     }
 
-    public function stream(array $messages, array $options, callable $onDelta): void
+    /**
+     * Streaming: si tu controlador usa stream, acá podés emitir por callback.
+     * Si el provider no soporta stream, hacemos “pseudo-stream”: llamamos generate y enviamos de una.
+     */
+    public function stream(array $messages, array $opts, callable $onDelta): void
     {
         $provider = env('LLM_PROVIDER', 'ollama');
-        switch ($provider) {
-            case 'ollama':
-                $this->ollamaStream($messages, $options, $onDelta);
-                break;
-            default:
-                throw new \RuntimeException('Streaming implementado sólo para Ollama en esta fase.');
+
+        // Por ahora: implementamos stream real para Ollama,
+        // y para OpenAI/Gemini emitimos todo de una (para no romper controladores existentes).
+        try {
+            if ($provider === 'ollama') {
+                $this->ollamaStream($messages, $opts, $onDelta);
+                return;
+            }
+
+            $txt = $this->generate($messages, $opts);
+            if ($txt !== '') {
+                $onDelta($txt);
+            }
+        } catch (\Throwable $e) {
+            \Log::error('LLM stream failed', ['provider' => $provider, 'error' => $e->getMessage()]);
         }
     }
 
-    protected function ollamaStream(array $messages, array $options, callable $onDelta): void
+    // ============ OPENAI ============
+    private function openaiGenerate(array $messages, array $opts): string
     {
-        $base  = rtrim(env('OLLAMA_BASE', 'http://host.docker.internal:11434'), '/');
-        $model = env('OLLAMA_MODEL', 'llama3.1:8b-instruct-q4_K_M');
-        $optionsArr = array_filter([
-            'temperature'   => (float)($options['temperature'] ?? env('LLM_TEMPERATURE', 0.2)),
-            'num_ctx'       => $options['num_ctx'] ?? null,
-            'num_thread'    => $options['num_thread'] ?? null,
-            'repeat_penalty' => $options['repeat_penalty'] ?? null,
-            'num_predict'   => $options['max_tokens'] ?? null, // 👈 mapea max_tokens -> num_predict
-        ]);
+        $apiKey = env('OPENAI_API_KEY');
+        if (!$apiKey) {
+            throw new \RuntimeException('OPENAI_API_KEY vacío');
+        }
+
+        $model = env('OPENAI_MODEL', 'gpt-4o-mini');
+        $temperature = (float)($opts['temperature'] ?? env('LLM_TEMPERATURE', 0.2));
+        $maxTokens   = (int)  ($opts['max_tokens']  ?? (int)env('LLM_MAX_TOKENS', 500));
+
+        $payload = [
+            'model'       => $model,
+            'messages'    => $messages,
+            'temperature' => $temperature,
+            'max_tokens'  => $maxTokens,
+        ];
+
+        $resp = Http::withToken($apiKey)
+            ->timeout(60)
+            ->post('https://api.openai.com/v1/chat/completions', $payload);
+
+        if (!$resp->successful()) {
+            throw new \RuntimeException('OpenAI: '.$resp->status().' '.$resp->body());
+        }
+
+        $data = $resp->json();
+        $text = $data['choices'][0]['message']['content'] ?? '';
+        return (string)$text;
+    }
+
+    // ============ OLLAMA ============
+    private function ollamaGenerate(array $messages, array $opts): string
+    {
+        $base = rtrim(env('OLLAMA_BASE', 'http://host.docker.internal:11434'), '/');
+        $model = env('OLLAMA_MODEL', 'llama3.1:8b-instruct');
+
+        // Opciones de Ollama
+        $temperature = (float)($opts['temperature'] ?? env('LLM_TEMPERATURE', 0.2));
+        $maxTokens   = (int)  ($opts['max_tokens']  ?? (int)env('LLM_MAX_TOKENS', 500));
+
+        $payload = [
+            'model'    => $model,
+            'messages' => $messages,
+            'stream'   => false, // importante: respuesta no streamed
+            'options'  => [
+                'temperature' => $temperature,
+                'num_predict' => $maxTokens,
+                // 'num_ctx'   => 2048, // si querés
+            ],
+        ];
+
+        $resp = Http::timeout(120)->post($base.'/api/chat', $payload);
+        if (!$resp->successful()) {
+            throw new \RuntimeException('Ollama: '.$resp->status().' '.$resp->body());
+        }
+
+        $data = $resp->json();
+
+        // Ollama (stream=false) retorna algo tipo:
+        // {
+        //   "model":"...","created_at":"...","message":{"role":"assistant","content":"..."},
+        //   "done":true, ...
+        // }
+        $text = $data['message']['content'] ?? ($data['response'] ?? '');
+        return (string)$text;
+    }
+
+    private function ollamaStream(array $messages, array $opts, callable $onDelta): void
+    {
+        $base = rtrim(env('OLLAMA_BASE', 'http://host.docker.internal:11434'), '/');
+        $model = env('OLLAMA_MODEL', 'llama3.1:8b-instruct');
+
+        $temperature = (float)($opts['temperature'] ?? env('LLM_TEMPERATURE', 0.2));
+        $maxTokens   = (int)  ($opts['max_tokens']  ?? (int)env('LLM_MAX_TOKENS', 500));
 
         $payload = [
             'model'    => $model,
             'messages' => $messages,
             'stream'   => true,
-            'options'  => $optionsArr,
+            'options'  => [
+                'temperature' => $temperature,
+                'num_predict' => $maxTokens,
+            ],
         ];
 
-
-        $res  = Http::withOptions(['stream' => true])->post($base . '/api/chat', $payload);
-        $body = $res->toPsrResponse()->getBody();
-
-        $buffer = '';
-        while (!$body->eof()) {
-            $chunk = $body->read(8192);
-            if ($chunk === '') {
-                usleep(10_000);
-                continue;
-            }
-            $buffer .= $chunk;
-
-            // Ollama envia NDJSON: procesamos por líneas
-            while (($pos = strpos($buffer, "\n")) !== false) {
-                $line = trim(substr($buffer, 0, $pos));
-                $buffer = substr($buffer, $pos + 1);
-                if ($line === '') continue;
-
-                $json = json_decode($line, true);
-                if (!is_array($json)) continue;
-
-                $delta = $json['message']['content'] ?? ($json['response'] ?? '');
+        // Stream chunked (cada línea JSON):
+        Http::timeout(0)->withOptions(['stream' => true])->post($base.'/api/chat', $payload)
+            ->throw()
+            ->getBody()
+            ->each(function ($chunk) use ($onDelta) {
+                $line = trim((string)$chunk);
+                if ($line === '') return;
+                // cada línea es un JSON con 'message'=>['content'=>'delta parcial'] o 'done'=>true
+                $data = json_decode($line, true);
+                if (!is_array($data)) return;
+                $delta = $data['message']['content'] ?? '';
                 if ($delta !== '') {
                     $onDelta($delta);
                 }
-            }
-        }
+            });
     }
 
-
-    /* ---------- OpenAI ---------- */
-    protected function openai(array $messages, array $opts): string
+    // ============ GEMINI (stub seguro) ============
+    private function geminiGenerate(array $messages, array $opts): string
     {
-        $apiKey = env('OPENAI_API_KEY');
-        if (!$apiKey) throw new \RuntimeException('OPENAI_API_KEY vacío');
-
-        $payload = [
-            'model' => $opts['model'] ?? env('OPENAI_MODEL', 'gpt-4o-mini'),
-            'messages' => $messages,
-            'temperature' => $opts['temperature'] ?? env('LLM_TEMPERATURE', 0.2),
-            'max_tokens' => $opts['max_tokens'] ?? env('LLM_MAX_TOKENS', 500),
-        ];
-
-        $res = Http::timeout(30)
-            ->withToken($apiKey)
-            ->post('https://api.openai.com/v1/chat/completions', $payload);
-
-        if (!$res->ok()) throw new \RuntimeException('OpenAI error: ' . $res->body());
-
-        return $res->json('choices.0.message.content') ?? '';
-    }
-
-    /* ---------- Gemini ---------- */
-    protected function gemini(array $messages, array $opts): string
-    {
-        $apiKey = env('GEMINI_API_KEY');
-        if (!$apiKey) throw new \RuntimeException('GEMINI_API_KEY vacío');
-
-        // Compactar mensajes a un único prompt (simple y suficiente para nuestro flujo)
-        $prompt = collect($messages)->map(function ($m) {
-            return strtoupper($m['role']) . ": " . $m['content'];
-        })->implode("\n\n");
-
-        $model = $opts['model'] ?? env('GEMINI_MODEL', 'gemini-2.0-flash');
-        $url = "https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent?key={$apiKey}";
-
-        $payload = [
-            'contents' => [['parts' => [['text' => $prompt]]]],
-            'generationConfig' => [
-                'temperature' => (float)($opts['temperature'] ?? env('LLM_TEMPERATURE', 0.2)),
-                'maxOutputTokens' => (int)($opts['max_tokens'] ?? env('LLM_MAX_TOKENS', 500)),
-            ],
-        ];
-
-        $res = Http::timeout(30)->post($url, $payload);
-        if (!$res->ok()) throw new \RuntimeException('Gemini error: ' . $res->body());
-
-        return $res->json('candidates.0.content.parts.0.text') ?? '';
-    }
-
-    /* ---------- Ollama ---------- */
-    protected function ollama(array $messages, array $opts): string
-    {
-        $base  = rtrim(env('OLLAMA_BASE', 'http://ollama:11434'), '/');
-        $model = $opts['model'] ?? env('OLLAMA_MODEL', 'llama3.1');
-
-        $payload = [
-            'model' => $model,
-            'messages' => $messages,
-            'stream' => false,
-            'options' => [
-                'temperature' => (float)($opts['temperature'] ?? env('LLM_TEMPERATURE', 0.2)),
-            ],
-        ];
-
-        $res = Http::timeout(60)->post($base . '/api/chat', $payload);
-        if (!$res->ok()) throw new \RuntimeException('Ollama error: ' . $res->body());
-
-        $data = $res->json();
-        // Formato nuevo: message.content; form. viejo: response
-        return $data['message']['content'] ?? ($data['response'] ?? '');
+        // Dejamos como stub para ahora. Siempre devolver string.
+        // Si luego querés implementarlo, similar a OpenAI (endpoint y formato de mensajes distinto).
+        return '';
     }
 }

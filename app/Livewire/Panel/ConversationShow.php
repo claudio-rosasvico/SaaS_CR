@@ -23,6 +23,6 @@ class ConversationShow extends Component
 
         return view('livewire.panel.conversation-show', [
             'conversation' => $conversation,
-        ]);
+        ])->layout('panel.layout', ['title' => 'Conversación']);
     }
 }

@@ -1,4 +1,5 @@
 <?php
+
 namespace App\Http\Middleware;
 
 use Closure;
@@ -10,19 +11,13 @@ class SetCurrentOrganization
     public function handle(Request $request, Closure $next): Response
     {
         if (auth()->check()) {
-            $user = auth()->user();
-
-            // Si no tiene org actual, usa la primera o crea una propia
-            if (!$user->current_organization_id) {
-                $org = $user->organizations()->first();
-                if (!$org) {
-                    $org = \App\Models\Organization::create(['name' => $user->name.' Org']);
-                    $user->organizations()->attach($org->id, ['role'=>'owner']);
-                }
-                $user->current_organization_id = $org->id;
-                $user->save();
-            }
+            // ya viene de la DB
+            session(['current_organization_id' => auth()->user()->current_organization_id]);
+        } elseif ($request->has('org')) {
+            // útil para tests o links con ?org=5
+            session(['current_organization_id' => (int) $request->get('org')]);
         }
+
         return $next($request);
     }
 }

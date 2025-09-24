@@ -1,5 +1,5 @@
 @extends('layouts.panel')
 
-@section('panel-content')
+@section('content')
   @livewire('panel.bots-index')
 @endsection

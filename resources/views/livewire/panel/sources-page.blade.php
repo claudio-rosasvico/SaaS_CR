@@ -46,7 +46,12 @@
 
                         @endswitch
 
-                        <button class="btn btn-primary">Guardar</button>
+                        <button class="btn btn-primary" wire:loading.attr="disabled" wire:target="save">
+                            <span wire:loading.remove wire:target="save">Guardar</span>
+                            <span wire:loading wire:target="save"><span class="spinner-border spinner-border-sm"></span>
+                                Guardando…</span>
+                        </button>
+
                     </form>
                 </div>
             </div>
@@ -70,14 +75,23 @@
                                 </tr>
                             </thead>
                             <tbody>
-                                @foreach ($sources as $s)
+                                @forelse ($sources as $s)
                                     <tr>
                                         <td>{{ $s->id }}</td>
                                         <td>{{ $s->title ?? '—' }}</td>
                                         <td><span class="badge bg-secondary">{{ $s->type }}</span></td>
                                         <td>
-                                            @php $color = $s->status === 'ready' ? 'success' : ($s->status === 'error' ? 'danger' : 'warning'); @endphp
-                                            <span class="badge bg-{{ $color }}">{{ $s->status }}</span>
+                                            @php
+                                                $map = [
+                                                    'ready' => 'success',
+                                                    'processing' => 'warning',
+                                                    'queued' => 'secondary',
+                                                    'embedding' => 'info',
+                                                    'error' => 'danger',
+                                                ];
+                                                $color = $map[$s->status] ?? 'secondary';
+                                            @endphp
+                                            <span class="badge text-bg-{{ $color }}">{{ $s->status }}</span>
                                         </td>
                                         <td style="min-width:160px">
                                             @php
@@ -111,7 +125,14 @@
                                             @endif
                                         </td>
                                     </tr>
-                                @endforeach
+                                @empty
+                                    <tr>
+                                        <td colspan="6" class="text-center py-4 text-muted">
+                                            <i class="bi bi-inbox me-1"></i>
+                                            Aún no cargaste fuentes. Subí un PDF o ingresá una URL para empezar.
+                                        </td>
+                                    </tr>
+                                @endforelse
                             </tbody>
                         </table>
                     </div>

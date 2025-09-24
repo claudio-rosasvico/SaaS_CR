@@ -1,23 +1,32 @@
 <?php
+
 namespace App\Models\Concerns;
 
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Scope;
+
+class OrgScope implements Scope
+{
+    public function apply(Builder $builder, Model $model)
+    {
+        // Evitar aplicar en consola de migraciones/seeders si no hay org en contexto
+        if (function_exists('current_org_id') && ($orgId = current_org_id())) {
+            $builder->where($model->getTable().'.organization_id', $orgId);
+        }
+    }
+}
 
 trait BelongsToOrganization
 {
-    protected static function bootBelongsToOrganization(): void
+    public static function bootBelongsToOrganization()
     {
-        // Global scope por org (solo en web; evitamos interferir con migraciones/queues si querés)
-        static::addGlobalScope('org', function (Builder $q) {
-            if (app()->runningInConsole()) return;
-            $orgId = current_org_id(null); // devuelve null si guest
-            if ($orgId) $q->where($q->getModel()->getTable().'.organization_id', $orgId);
-        });
+        static::addGlobalScope(new OrgScope);
 
-        // Autollenado al crear
-        static::creating(function ($model) {
-            if (empty($model->organization_id)) {
-                $model->organization_id = current_org_id();
+        // Asignar org automáticamente al crear
+        static::creating(function (Model $model) {
+            if (function_exists('current_org_id') && !$model->getAttribute('organization_id')) {
+                $model->setAttribute('organization_id', current_org_id());
             }
         });
     }

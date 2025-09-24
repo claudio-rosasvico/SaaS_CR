@@ -37,12 +37,20 @@ class ChatWidget extends Component
 
     public function send(ChatService $chat)
     {
+        {
         $text = trim($this->input);
         if ($text === '') return;
 
-        $chat->handle($this->conversationId, $text, 'web');
-        $this->loadMessages();
+        $resp = $chat->handle($this->conversationId, $text, 'web');
+        $this->conversationId = $resp['conversation_id'];
+
+        $lastTwo = array_slice($resp['messages'], -2);
+        foreach ($lastTwo as $m) {
+            $this->messages[] = ['role' => $m['role'], 'content' => $m['content']];
+        }
+
         $this->input = '';
+    }
     }
 
     #[On('refreshMessages')]
