@@ -51,11 +51,11 @@
             </a>
 
             <nav class="nav" aria-label="Principal">
-                <button class="nav-toggle" aria-expanded="false" aria-controls="nav-menu" aria-label="Abrir menú">
+{{--                 <button class="nav-toggle" aria-expanded="false" aria-controls="nav-menu" aria-label="Abrir menú">
                     <span class="nav-toggle-bar"></span>
                     <span class="nav-toggle-bar"></span>
                     <span class="nav-toggle-bar"></span>
-                </button>
+                </button> --}}
                 <ul id="nav-menu" class="nav-menu">
                     <li><a href="#servicios">Servicios</a></li>
                     <li><a href="#como-funciona">Cómo funciona</a></li>
