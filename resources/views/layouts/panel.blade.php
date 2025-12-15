@@ -13,7 +13,7 @@
 <body>
     <nav class="navbar navbar-expand bg-white px-3 sticky-top">
         <a class="navbar-brand d-flex align-items-center gap-2" href="{{ route('panel.dashboard') }}">
-            @php $logo = config('app.logo_url') ?? asset('images/logo-crdw.svg'); @endphp
+            @php $logo = config('app.logo_url') ?? asset('images/Logo_azul_fondo_amarillo.png'); @endphp
             <img src="{{ $logo }}" alt="Logo">
             <strong>{{ config('app.name') }}</strong>
         </a>
