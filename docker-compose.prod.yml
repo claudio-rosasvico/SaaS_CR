@@ -69,6 +69,22 @@ services:
     restart: always
     networks: [ backend ]
 
+  telegram_poll:
+    build:
+      context: .
+      dockerfile: ./docker/app/Dockerfile.prod
+    container_name: chatbot_tg_poll_prod
+    command: php artisan telegram:poll-all
+    env_file: .env
+    working_dir: /var/www/html
+    depends_on:
+      - app
+      - mysql
+      - redis
+    restart: always
+    networks:
+      - backend
+
 networks:
   backend:
     driver: bridge
