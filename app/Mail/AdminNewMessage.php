@@ -11,11 +11,13 @@ class AdminNewMessage extends Mailable
 {
     use Queueable, SerializesModels;
 
-    public function __construct(public ContactMessage $messageData) {}
+    public function __construct(public ContactMessage $messageData)
+    {
+    }
 
     public function build()
     {
-        return $this->subject('Nuevo contacto en Shift+IA')
+        return $this->subject('Nuevo contacto en NowIA')
             ->view('emails.admin_new_message');
     }
 }

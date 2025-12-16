@@ -11,11 +11,13 @@ class UserAutoReply extends Mailable
 {
     use Queueable, SerializesModels;
 
-    public function __construct(public ContactMessage $messageData) {}
+    public function __construct(public ContactMessage $messageData)
+    {
+    }
 
     public function build()
     {
-        return $this->subject('¡Gracias por escribir a Shift+IA!')
+        return $this->subject('¡Gracias por escribir a NowIA!')
             ->view('emails.user_auto_reply');
     }
 }

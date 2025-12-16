@@ -45,7 +45,7 @@
                         <label class="form-label">Asunto</label>
                         <input type="text" name="response_subject"
                             class="form-control @error('response_subject') is-invalid @enderror"
-                            value="{{ old('response_subject', 'Sobre tu consulta en Shift+IA') }}" required>
+                            value="{{ old('response_subject', 'Sobre tu consulta en NowIA') }}" required>
                         @error('response_subject')
                             <div class="invalid-feedback">{{ $message }}</div>
                         @enderror
@@ -53,8 +53,9 @@
 
                     <div class="mb-3">
                         <label class="form-label">Mensaje</label>
-                        <textarea name="response_body" rows="8" class="form-control @error('response_body') is-invalid @enderror"
-                            required>{{ old('response_body', "Hola {$message->nombre},\n\nGracias por escribirnos. Te comparto algunos detalles...\n\n— Equipo Shift+IA") }}</textarea>
+                        <textarea name="response_body" rows="8"
+                            class="form-control @error('response_body') is-invalid @enderror"
+                            required>{{ old('response_body', "Hola {$message->nombre},\n\nGracias por escribirnos. Te comparto algunos detalles...\n\n— Equipo NowIA") }}</textarea>
                         @error('response_body')
                             <div class="invalid-feedback">{{ $message }}</div>
                         @enderror
