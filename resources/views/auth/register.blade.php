@@ -3,58 +3,63 @@
         @csrf
 
         <!-- Name -->
-        <div>
-            <x-input-label for="name" :value="__('Name')" />
-            <x-text-input id="name" class="block mt-1 w-full" type="text" name="name" :value="old('name')" required
-                autofocus autocomplete="name" />
-            <x-input-error :messages="$errors->get('name')" class="mt-2" />
+        <div class="mb-3">
+            <label for="name" class="form-label text-light">{{ __('Nombre') }}</label>
+            <input id="name" class="form-control" type="text" name="name" value="{{ old('name') }}" required autofocus
+                autocomplete="name">
+            @error('name')
+                <div class="text-danger mt-1 small">{{ $message }}</div>
+            @enderror
         </div>
 
         <!-- Organization Name -->
-        <div class="mt-4">
-            <x-input-label for="organization_name" :value="__('Organization Name')" />
-            <x-text-input id="organization_name" class="block mt-1 w-full" type="text" name="organization_name"
-                :value="old('organization_name')" required autocomplete="organization" />
-            <x-input-error :messages="$errors->get('organization_name')" class="mt-2" />
+        <div class="mb-3">
+            <label for="organization_name" class="form-label text-light">{{ __('Nombre de la Organización') }}</label>
+            <input id="organization_name" class="form-control" type="text" name="organization_name"
+                value="{{ old('organization_name') }}" required autocomplete="organization">
+            @error('organization_name')
+                <div class="text-danger mt-1 small">{{ $message }}</div>
+            @enderror
         </div>
 
         <!-- Email Address -->
-        <div class="mt-4">
-            <x-input-label for="email" :value="__('Email')" />
-            <x-text-input id="email" class="block mt-1 w-full" type="email" name="email" :value="old('email')" required
-                autocomplete="username" />
-            <x-input-error :messages="$errors->get('email')" class="mt-2" />
+        <div class="mb-3">
+            <label for="email" class="form-label text-light">{{ __('Correo Electrónico') }}</label>
+            <input id="email" class="form-control" type="email" name="email" value="{{ old('email') }}" required
+                autocomplete="username">
+            @error('email')
+                <div class="text-danger mt-1 small">{{ $message }}</div>
+            @enderror
         </div>
 
         <!-- Password -->
-        <div class="mt-4">
-            <x-input-label for="password" :value="__('Password')" />
-
-            <x-text-input id="password" class="block mt-1 w-full" type="password" name="password" required
-                autocomplete="new-password" />
-
-            <x-input-error :messages="$errors->get('password')" class="mt-2" />
+        <div class="mb-3">
+            <label for="password" class="form-label text-light">{{ __('Contraseña') }}</label>
+            <input id="password" class="form-control" type="password" name="password" required
+                autocomplete="new-password">
+            @error('password')
+                <div class="text-danger mt-1 small">{{ $message }}</div>
+            @enderror
         </div>
 
         <!-- Confirm Password -->
-        <div class="mt-4">
-            <x-input-label for="password_confirmation" :value="__('Confirm Password')" />
-
-            <x-text-input id="password_confirmation" class="block mt-1 w-full" type="password"
-                name="password_confirmation" required autocomplete="new-password" />
-
-            <x-input-error :messages="$errors->get('password_confirmation')" class="mt-2" />
+        <div class="mb-3">
+            <label for="password_confirmation" class="form-label text-light">{{ __('Confirmar Contraseña') }}</label>
+            <input id="password_confirmation" class="form-control" type="password" name="password_confirmation" required
+                autocomplete="new-password">
+            @error('password_confirmation')
+                <div class="text-danger mt-1 small">{{ $message }}</div>
+            @enderror
         </div>
 
-        <div class="flex items-center justify-end mt-4">
-            <a class="underline text-sm text-gray-600 hover:text-gray-900 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-                href="{{ route('login') }}">
-                {{ __('Already registered?') }}
+        <div class="d-flex justify-content-between align-items-center mt-4">
+            <a class="text-decoration-none text-brand-secondary small" href="{{ route('login') }}">
+                {{ __('¿Ya estás registrado?') }}
             </a>
 
-            <x-primary-button class="ms-4">
-                {{ __('Register') }}
-            </x-primary-button>
+            <button type="submit" class="btn btn-primary px-4">
+                {{ __('Registrarse') }}
+            </button>
         </div>
     </form>
 </x-guest-layout>
